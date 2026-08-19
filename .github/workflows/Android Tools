@@ -1,0 +1,61 @@
+name: Build GhostLock Android Native Tools
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths-ignore:
+      - "**.md"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Download Android NDK r27c
+        run: |
+          wget -q https://dl.google.com/android/repository/android-ndk-r27c-linux.zip
+          unzip -q android-ndk-r27c-linux.zip
+          mv android-ndk-r27c ndk
+          echo "NDK_HOME=$PWD/ndk" >> $GITHUB_ENV
+          echo "$PWD/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
+
+      - name: Build ghostlock-extract (Android arm64)
+        working-directory: tools/extract_rs
+        env:
+          CC_aarch64_linux_android: ${{ github.workspace }}/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang
+          AR_aarch64_linux_android: ${{ github.workspace }}/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar
+          CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER: ${{ github.workspace }}/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang
+        run: cargo build --release --target aarch64-linux-android
+
+      - name: Build ghostlock native binary (Android arm64)
+        env:
+          CC: aarch64-linux-android35-clang
+          CXX: aarch64-linux-android35-clang++
+          AR: llvm-ar
+          STRIP: llvm-strip
+        run: make ghostlock
+
+      - name: Strip binaries
+        run: |
+          llvm-strip tools/extract_rs/target/aarch64-linux-android/release/ghostlock-extract
+          llvm-strip ghostlock
+
+      - name: Upload Android Tools
+        uses: actions/upload-artifact@v4
+        with:
+          name: ghostlock-android-arm64
+          path: |
+            tools/extract_rs/target/aarch64-linux-android/release/ghostlock-extract
+            ghostlock
+          if-no-files-found: error
